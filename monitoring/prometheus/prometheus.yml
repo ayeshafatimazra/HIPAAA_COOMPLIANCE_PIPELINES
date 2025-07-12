@@ -1,0 +1,65 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # cAdvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Airflow metrics (if using Airflow with Prometheus plugin)
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # RDS metrics via CloudWatch exporter
+  - job_name: 'rds-metrics'
+    static_configs:
+      - targets: ['cloudwatch-exporter:9106']
+    scrape_interval: 60s
+
+  # Lambda metrics via CloudWatch exporter
+  - job_name: 'lambda-metrics'
+    static_configs:
+      - targets: ['cloudwatch-exporter:9106']
+    scrape_interval: 60s
+
+  # S3 metrics via CloudWatch exporter
+  - job_name: 's3-metrics'
+    static_configs:
+      - targets: ['cloudwatch-exporter:9106']
+    scrape_interval: 60s
+
+  # Custom ETL metrics
+  - job_name: 'etl-metrics'
+    static_configs:
+      - targets: ['etl-metrics-exporter:9100']
+    scrape_interval: 30s
+
+  # Security metrics
+  - job_name: 'security-metrics'
+    static_configs:
+      - targets: ['security-metrics-exporter:9100']
+    scrape_interval: 60s 
