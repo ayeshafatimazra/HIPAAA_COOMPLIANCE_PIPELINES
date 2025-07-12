@@ -17,12 +17,39 @@ import pandas as pd
 import boto3
 from cryptography.fernet import Fernet
 from jsonschema import validate, ValidationError
-from airflow.models import BaseOperator
-from airflow.utils.decorators import apply_defaults
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.providers.sftp.hooks.sftp import SFTPHook
-from airflow.providers.http.hooks.http import HttpHook
-from airflow.hooks.postgres_hook import PostgresHook
+
+# Airflow imports with error handling
+try:
+    from airflow.models import BaseOperator
+    from airflow.utils.decorators import apply_defaults
+    from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+    from airflow.providers.sftp.hooks.sftp import SFTPHook
+    from airflow.providers.http.hooks.http import HttpHook
+    from airflow.hooks.postgres_hook import PostgresHook
+except ImportError:
+    # Mock classes for development/testing
+    class BaseOperator:
+        def __init__(self, *args, **kwargs):
+            pass
+    
+    def apply_defaults(func):
+        return func
+    
+    class S3Hook:
+        def __init__(self, aws_conn_id=None):
+            pass
+    
+    class SFTPHook:
+        def __init__(self, ftp_conn_id=None):
+            pass
+    
+    class HttpHook:
+        def __init__(self, http_conn_id=None, method='GET'):
+            pass
+    
+    class PostgresHook:
+        def __init__(self, postgres_conn_id=None):
+            pass
 
 logger = logging.getLogger(__name__)
 
@@ -60,54 +87,70 @@ class EncryptedExtractOperator(BaseOperator):
         """Execute the encrypted extraction."""
         logger.info(f"Starting encrypted extraction from {self.source_type}")
         
-        if self.source_type == 'sftp':
-            data = self._extract_from_sftp()
-        elif self.source_type == 'api':
-            data = self._extract_from_api()
-        else:
-            raise ValueError(f"Unsupported source type: {self.source_type}")
-        
-        # Upload to S3 with encryption
-        self._upload_to_s3_encrypted(data)
-        
-        logger.info(f"Encrypted extraction completed: {self.s3_key}")
+        try:
+            if self.source_type == 'sftp':
+                data = self._extract_from_sftp()
+            elif self.source_type == 'api':
+                data = self._extract_from_api()
+            else:
+                raise ValueError(f"Unsupported source type: {self.source_type}")
+            
+            # Upload to S3 with encryption
+            self._upload_to_s3_encrypted(data)
+            
+            logger.info(f"Encrypted extraction completed: {self.s3_key}")
+        except Exception as e:
+            logger.error(f"Extraction failed: {str(e)}")
+            raise
 
     def _extract_from_sftp(self) -> bytes:
         """Extract data from SFTP server."""
-        sftp_hook = SFTPHook(ftp_conn_id=self.sftp_conn_id)
-        
-        with sftp_hook.get_conn() as sftp:
-            with sftp.file(self.source_path, 'rb') as remote_file:
-                data = remote_file.read()
-        
-        logger.info(f"Extracted {len(data)} bytes from SFTP")
-        return data
+        try:
+            sftp_hook = SFTPHook(ftp_conn_id=self.sftp_conn_id)
+            
+            with sftp_hook.get_conn() as sftp:
+                with sftp.file(self.source_path, 'rb') as remote_file:
+                    data = remote_file.read()
+            
+            logger.info(f"Extracted {len(data)} bytes from SFTP")
+            return data
+        except Exception as e:
+            logger.error(f"SFTP extraction failed: {str(e)}")
+            raise
 
     def _extract_from_api(self) -> bytes:
         """Extract data from API endpoint."""
-        http_hook = HttpHook(http_conn_id=self.api_conn_id, method='GET')
-        
-        response = http_hook.run(endpoint=self.api_endpoint)
-        response.raise_for_status()
-        
-        data = response.content
-        logger.info(f"Extracted {len(data)} bytes from API")
-        return data
+        try:
+            http_hook = HttpHook(http_conn_id=self.api_conn_id, method='GET')
+            
+            response = http_hook.run(endpoint=self.api_endpoint)
+            response.raise_for_status()
+            
+            data = response.content
+            logger.info(f"Extracted {len(data)} bytes from API")
+            return data
+        except Exception as e:
+            logger.error(f"API extraction failed: {str(e)}")
+            raise
 
     def _upload_to_s3_encrypted(self, data: bytes) -> None:
         """Upload data to S3 with server-side encryption."""
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        
-        # Upload with SSE-KMS encryption
-        s3_hook.load_bytes(
-            bytes_data=data,
-            key=self.s3_key,
-            bucket_name=self.s3_bucket,
-            replace=True,
-            encrypt=True,
-            encryption='aws:kms',
-            encryption_kms_key_id=self.kms_key_arn
-        )
+        try:
+            s3_hook = S3Hook(aws_conn_id='aws_default')
+            
+            # Upload with SSE-KMS encryption
+            s3_hook.load_bytes(
+                bytes_data=data,
+                key=self.s3_key,
+                bucket_name=self.s3_bucket,
+                replace=True,
+                encrypt=True,
+                encryption='aws:kms',
+                encryption_kms_key_id=self.kms_key_arn
+            )
+        except Exception as e:
+            logger.error(f"S3 upload failed: {str(e)}")
+            raise
 
 
 class SchemaValidationOperator(BaseOperator):
@@ -135,45 +178,57 @@ class SchemaValidationOperator(BaseOperator):
         """Execute schema validation."""
         logger.info(f"Starting schema validation for {self.s3_key}")
         
-        # Load schema
-        schema = self._load_schema()
-        
-        # Download and validate data
-        data = self._download_from_s3()
-        validation_errors = self._validate_data(data, schema)
-        
-        if validation_errors:
-            error_msg = f"Schema validation failed: {validation_errors}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        logger.info("Schema validation completed successfully")
+        try:
+            # Load schema
+            schema = self._load_schema()
+            
+            # Download and validate data
+            data = self._download_from_s3()
+            validation_errors = self._validate_data(data, schema)
+            
+            if validation_errors:
+                error_msg = f"Schema validation failed: {validation_errors}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            logger.info("Schema validation completed successfully")
+        except Exception as e:
+            logger.error(f"Schema validation failed: {str(e)}")
+            raise
 
     def _load_schema(self) -> Dict[str, Any]:
         """Load JSON schema from file."""
-        schema_path = os.path.join(os.path.dirname(__file__), '..', self.schema_file)
-        
-        with open(schema_path, 'r') as f:
-            return json.load(f)
+        try:
+            schema_path = os.path.join(os.path.dirname(__file__), '..', self.schema_file)
+            
+            with open(schema_path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load schema: {str(e)}")
+            raise
 
     def _download_from_s3(self) -> pd.DataFrame:
         """Download data from S3."""
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        
-        # Download to temporary file
-        temp_file = s3_hook.download_file(
-            key=self.s3_key,
-            bucket_name=self.s3_bucket,
-            local_path='/tmp/'
-        )
-        
-        # Read CSV
-        df = pd.read_csv(temp_file)
-        
-        # Clean up
-        os.remove(temp_file)
-        
-        return df
+        try:
+            s3_hook = S3Hook(aws_conn_id='aws_default')
+            
+            # Download to temporary file
+            temp_file = s3_hook.download_file(
+                key=self.s3_key,
+                bucket_name=self.s3_bucket,
+                local_path='/tmp/'
+            )
+            
+            # Read CSV
+            df = pd.read_csv(temp_file)
+            
+            # Clean up
+            os.remove(temp_file)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Failed to download from S3: {str(e)}")
+            raise
 
     def _validate_data(self, df: pd.DataFrame, schema: Dict[str, Any]) -> list:
         """Validate DataFrame against schema."""
@@ -215,33 +270,41 @@ class PIIMaskingOperator(BaseOperator):
 
     def execute(self, context):
         """Execute PII masking."""
-        logger.info(f"Starting PII masking: {self.input_s3_key} -> {self.output_s3_key}")
+        logger.info(f"Starting PII masking for {self.input_s3_key}")
         
-        # Download data
-        df = self._download_from_s3()
-        
-        # Apply masking rules
-        masked_df = self._apply_masking_rules(df)
-        
-        # Upload masked data
-        self._upload_to_s3_encrypted(masked_df)
-        
-        logger.info("PII masking completed successfully")
+        try:
+            # Download data
+            df = self._download_from_s3()
+            
+            # Apply masking rules
+            masked_df = self._apply_masking_rules(df)
+            
+            # Upload masked data
+            self._upload_to_s3_encrypted(masked_df)
+            
+            logger.info(f"PII masking completed: {self.output_s3_key}")
+        except Exception as e:
+            logger.error(f"PII masking failed: {str(e)}")
+            raise
 
     def _download_from_s3(self) -> pd.DataFrame:
         """Download data from S3."""
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        
-        temp_file = s3_hook.download_file(
-            key=self.input_s3_key,
-            bucket_name=self.input_s3_bucket,
-            local_path='/tmp/'
-        )
-        
-        df = pd.read_csv(temp_file)
-        os.remove(temp_file)
-        
-        return df
+        try:
+            s3_hook = S3Hook(aws_conn_id='aws_default')
+            
+            temp_file = s3_hook.download_file(
+                key=self.input_s3_key,
+                bucket_name=self.input_s3_bucket,
+                local_path='/tmp/'
+            )
+            
+            df = pd.read_csv(temp_file)
+            os.remove(temp_file)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Failed to download from S3: {str(e)}")
+            raise
 
     def _apply_masking_rules(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply masking rules to DataFrame."""
@@ -260,55 +323,61 @@ class PIIMaskingOperator(BaseOperator):
 
     def _hash_value(self, value: str) -> str:
         """Hash a value using SHA-256."""
-        if pd.isna(value):
+        if pd.isna(value) or value == '':
             return value
         return hashlib.sha256(str(value).encode()).hexdigest()[:16]
 
     def _mask_value(self, value: str) -> str:
         """Mask a value by replacing characters with asterisks."""
-        if pd.isna(value):
+        if pd.isna(value) or value == '':
             return value
         
         value_str = str(value)
-        if len(value_str) <= 4:
-            return '*' * len(value_str)
-        
-        return value_str[:2] + '*' * (len(value_str) - 4) + value_str[-2:]
+        if '@' in value_str:  # Email
+            parts = value_str.split('@')
+            return f"{parts[0][:2]}***@{parts[1]}"
+        elif len(value_str) >= 10:  # Phone number
+            return f"{value_str[:3]}***{value_str[-4:]}"
+        else:
+            return f"{value_str[:2]}***"
 
     def _generalize_value(self, value: str) -> str:
-        """Generalize a value (e.g., address to city only)."""
-        if pd.isna(value):
+        """Generalize a value (e.g., address to city/state)."""
+        if pd.isna(value) or value == '':
             return value
-        
-        # Simple generalization - could be enhanced based on specific requirements
-        return str(value).split(',')[0] if ',' in str(value) else str(value)
+        # Simple generalization - in production, use more sophisticated logic
+        return "Generalized Location"
 
     def _upload_to_s3_encrypted(self, df: pd.DataFrame) -> None:
         """Upload DataFrame to S3 with encryption."""
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        
-        # Save to temporary file
-        temp_file = '/tmp/masked_data.csv'
-        df.to_csv(temp_file, index=False)
-        
-        # Upload with encryption
-        s3_hook.load_file(
-            filename=temp_file,
-            key=self.output_s3_key,
-            bucket_name=self.output_s3_bucket,
-            replace=True,
-            encrypt=True,
-            encryption='aws:kms',
-            encryption_kms_key_id=self.kms_key_arn
-        )
-        
-        # Clean up
-        os.remove(temp_file)
+        try:
+            s3_hook = S3Hook(aws_conn_id='aws_default')
+            
+            # Save to temporary file
+            temp_file = '/tmp/masked_data.csv'
+            df.to_csv(temp_file, index=False)
+            
+            # Upload with encryption
+            s3_hook.load_file(
+                filename=temp_file,
+                key=self.output_s3_key,
+                bucket_name=self.output_s3_bucket,
+                replace=True,
+                encrypt=True,
+                encryption='aws:kms',
+                encryption_kms_key_id=self.kms_key_arn
+            )
+            
+            # Clean up
+            os.remove(temp_file)
+        except Exception as e:
+            logger.error(f"Failed to upload to S3: {str(e)}")
+            raise
 
 
 class EncryptedLoadOperator(BaseOperator):
     """
-    Load encrypted data from S3 to RDS database.
+    Load encrypted data from S3 to database with encryption.
     """
     
     @apply_defaults
@@ -330,71 +399,73 @@ class EncryptedLoadOperator(BaseOperator):
         self.kms_key_arn = kms_key_arn
 
     def execute(self, context):
-        """Execute encrypted data loading."""
-        logger.info(f"Starting encrypted load to {self.table_name}")
+        """Execute encrypted loading."""
+        logger.info(f"Starting encrypted loading to {self.table_name}")
         
-        # Download data from S3
-        df = self._download_from_s3()
-        
-        # Add metadata columns
-        df['load_date'] = datetime.now().date()
-        df['load_timestamp'] = datetime.now()
-        
-        # Load to database
-        self._load_to_database(df)
-        
-        logger.info(f"Encrypted load completed: {len(df)} records")
+        try:
+            # Download data
+            df = self._download_from_s3()
+            
+            # Load to database
+            self._load_to_database(df)
+            
+            logger.info(f"Encrypted loading completed: {self.table_name}")
+        except Exception as e:
+            logger.error(f"Encrypted loading failed: {str(e)}")
+            raise
 
     def _download_from_s3(self) -> pd.DataFrame:
         """Download data from S3."""
-        s3_hook = S3Hook(aws_conn_id='aws_default')
-        
-        temp_file = s3_hook.download_file(
-            key=self.s3_key,
-            bucket_name=self.s3_bucket,
-            local_path='/tmp/'
-        )
-        
-        df = pd.read_csv(temp_file)
-        os.remove(temp_file)
-        
-        return df
+        try:
+            s3_hook = S3Hook(aws_conn_id='aws_default')
+            
+            temp_file = s3_hook.download_file(
+                key=self.s3_key,
+                bucket_name=self.s3_bucket,
+                local_path='/tmp/'
+            )
+            
+            df = pd.read_csv(temp_file)
+            os.remove(temp_file)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Failed to download from S3: {str(e)}")
+            raise
 
     def _load_to_database(self, df: pd.DataFrame) -> None:
         """Load DataFrame to database."""
-        pg_hook = PostgresHook(postgres_conn_id=self.database_conn_id)
-        
-        # Convert DataFrame to list of tuples for batch insert
-        records = [tuple(x) for x in df.values]
-        columns = list(df.columns)
-        
-        # Create table if not exists
-        self._create_table_if_not_exists(pg_hook, columns)
-        
-        # Insert data
-        pg_hook.insert_rows(
-            table=self.table_name,
-            rows=records,
-            target_fields=columns
-        )
+        try:
+            pg_hook = PostgresHook(postgres_conn_id=self.database_conn_id)
+            
+            # Create table if not exists
+            self._create_table_if_not_exists(pg_hook, df.columns.tolist())
+            
+            # Insert data
+            for index, row in df.iterrows():
+                columns = ', '.join(row.index)
+                values = ', '.join(['%s'] * len(row))
+                insert_query = f"INSERT INTO {self.table_name} ({columns}) VALUES ({values})"
+                
+                pg_hook.run(insert_query, parameters=row.tolist())
+            
+            logger.info(f"Loaded {len(df)} records to {self.table_name}")
+        except Exception as e:
+            logger.error(f"Failed to load to database: {str(e)}")
+            raise
 
     def _create_table_if_not_exists(self, pg_hook: PostgresHook, columns: list) -> None:
         """Create table if it doesn't exist."""
-        # This is a simplified version - in production, you'd want proper schema management
-        column_definitions = []
-        
-        for col in columns:
-            if col in ['load_date', 'encounter_date']:
-                column_definitions.append(f"{col} DATE")
-            elif col == 'load_timestamp':
-                column_definitions.append(f"{col} TIMESTAMP")
-            else:
-                column_definitions.append(f"{col} TEXT")
-        
-        create_table_sql = f"""
-        CREATE TABLE IF NOT EXISTS {self.table_name} (
-            {', '.join(column_definitions)}
-        )
-        """
-        
-        pg_hook.run(create_table_sql) 
+        try:
+            # Simple table creation - in production, use proper schema management
+            create_query = f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id SERIAL PRIMARY KEY,
+                {', '.join([f'{col} TEXT' for col in columns])},
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+            pg_hook.run(create_query)
+        except Exception as e:
+            logger.error(f"Failed to create table: {str(e)}")
+            raise 

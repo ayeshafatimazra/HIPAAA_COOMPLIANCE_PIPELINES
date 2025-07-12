@@ -19,6 +19,9 @@ from airflow.providers.sftp.hooks.sftp import SFTPHook
 from airflow.providers.http.hooks.http import HttpHook
 from airflow.models import Variable
 
+# Import custom operators
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from operators.hipaa_operators import (
     EncryptedExtractOperator,
     PIIMaskingOperator,
@@ -52,9 +55,9 @@ dag = DAG(
     tags=['hipaa', 'etl', 'phi', 'compliance'],
 )
 
-# Configuration
-S3_BUCKET = Variable.get('hipaa_s3_bucket')
-KMS_KEY_ARN = Variable.get('hipaa_kms_key_arn')
+# Configuration - use environment variables or defaults
+S3_BUCKET = Variable.get('hipaa_s3_bucket', default_var='hipaa-etl-bucket')
+KMS_KEY_ARN = Variable.get('hipaa_kms_key_arn', default_var='arn:aws:kms:us-east-1:123456789012:key/your-kms-key')
 DATABASE_CONN_ID = 'hipaa_postgres'
 SFTP_CONN_ID = 'hipaa_sftp'
 API_CONN_ID = 'hipaa_api'
@@ -67,6 +70,8 @@ extract_task = EncryptedExtractOperator(
     s3_bucket=S3_BUCKET,
     s3_key='raw/{{ ds }}/phi_data.csv',
     kms_key_arn=KMS_KEY_ARN,
+    source_type='sftp',
+    source_path='/data/phi_data.csv',
     dag=dag,
 )
 
@@ -198,14 +203,26 @@ def log_etl_completion(dag_run_id: str, execution_date: str, status: str) -> Non
         dag_run_id, execution_date, status, completed_at, 
         records_processed, error_message
     ) VALUES (
-        %s, %s, %s, NOW(), 
-        (SELECT COUNT(*) FROM phi_data WHERE load_date = %s),
-        NULL
+        %s, %s, %s, %s, %s, %s
     )
     """
     
-    pg_hook.run(audit_query, parameters=[
-        dag_run_id, execution_date, status, execution_date
-    ])
+    # Get record count
+    count_query = f"""
+    SELECT COUNT(*) FROM phi_data WHERE load_date = '{execution_date}'
+    """
+    record_count = pg_hook.get_first(count_query)[0]
     
-    logger.info(f"ETL completion logged: {dag_run_id} - {status}") 
+    pg_hook.run(
+        audit_query,
+        parameters=(
+            dag_run_id,
+            execution_date,
+            status,
+            datetime.now(),
+            record_count,
+            None
+        )
+    )
+    
+    logger.info(f"ETL completion logged: {dag_run_id} - {status} - {record_count} records") 
