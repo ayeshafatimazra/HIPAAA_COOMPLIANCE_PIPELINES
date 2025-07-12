@@ -1,0 +1,169 @@
+groups:
+  - name: hipaa_etl_alerts
+    rules:
+      # ETL Pipeline Failures
+      - alert: ETLPipelineFailure
+        expr: airflow_dag_status{status="failed"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "ETL Pipeline Failure Detected"
+          description: "HIPAA ETL pipeline has failed for {{ $labels.dag_id }}. Immediate attention required for compliance."
+
+      - alert: ETLPipelineStuck
+        expr: airflow_dag_duration_seconds > 7200
+        for: 10m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "ETL Pipeline Stuck"
+          description: "ETL pipeline {{ $labels.dag_id }} has been running for more than 2 hours."
+
+      # Data Quality Alerts
+      - alert: DataQualityIssues
+        expr: etl_data_quality_score < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "Data Quality Issues Detected"
+          description: "Data quality score has dropped below 95% for {{ $labels.table_name }}."
+
+      - alert: MissingRequiredFields
+        expr: etl_missing_required_fields > 0
+        for: 2m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "Missing Required PHI Fields"
+          description: "Required PHI fields are missing in {{ $labels.table_name }}. Compliance violation possible."
+
+      # Security Alerts
+      - alert: UnauthorizedAccess
+        expr: security_unauthorized_access_attempts > 0
+        for: 1m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "Unauthorized Access Attempt"
+          description: "Unauthorized access attempt detected on {{ $labels.resource }}. Security incident."
+
+      - alert: EncryptionFailure
+        expr: etl_encryption_failures > 0
+        for: 2m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "Encryption Failure"
+          description: "Data encryption has failed for {{ $labels.file }}. HIPAA compliance at risk."
+
+      - alert: AuditLogFailure
+        expr: etl_audit_log_failures > 0
+        for: 5m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "Audit Logging Failure"
+          description: "Audit logging has failed. Compliance monitoring compromised."
+
+      # Performance Alerts
+      - alert: HighLatency
+        expr: etl_processing_duration_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "High ETL Processing Latency"
+          description: "ETL processing is taking longer than 30 minutes for {{ $labels.dag_id }}."
+
+      - alert: HighErrorRate
+        expr: rate(etl_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "High ETL Error Rate"
+          description: "Error rate is above 10% for {{ $labels.dag_id }}."
+
+      # Infrastructure Alerts
+      - alert: DatabaseConnectionIssues
+        expr: rds_connection_count / rds_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "Database Connection Pool High"
+          description: "Database connection pool is at {{ $value | humanizePercentage }} capacity."
+
+      - alert: S3BucketFull
+        expr: s3_bucket_size_bytes / s3_bucket_quota_bytes > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "S3 Bucket Nearly Full"
+          description: "S3 bucket {{ $labels.bucket_name }} is {{ $value | humanizePercentage }} full."
+
+      - alert: LambdaFunctionErrors
+        expr: lambda_errors_total > 0
+        for: 2m
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "Lambda Function Errors"
+          description: "Lambda function {{ $labels.function_name }} has encountered errors."
+
+      # Compliance Alerts
+      - alert: DataRetentionViolation
+        expr: etl_data_retention_days > 2555
+        for: 1h
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "Data Retention Policy Violation"
+          description: "Data has been retained for more than 7 years in {{ $labels.table_name }}."
+
+      - alert: PIIExposure
+        expr: etl_pii_exposure_events > 0
+        for: 1m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "PII Exposure Detected"
+          description: "Potential PII exposure detected in {{ $labels.process }}. Immediate investigation required."
+
+      # Backup and Recovery Alerts
+      - alert: BackupFailure
+        expr: etl_backup_failures > 0
+        for: 30m
+        labels:
+          severity: critical
+          compliance: hipaa
+        annotations:
+          summary: "Backup Failure"
+          description: "Data backup has failed for {{ $labels.database }}. Recovery capability compromised."
+
+      - alert: RecoveryTestFailure
+        expr: etl_recovery_test_failures > 0
+        for: 1h
+        labels:
+          severity: warning
+          compliance: hipaa
+        annotations:
+          summary: "Recovery Test Failure"
+          description: "Data recovery test has failed. Disaster recovery plan needs review." 
